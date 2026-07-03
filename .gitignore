@@ -1,0 +1,53 @@
+# 依赖
+node_modules/
+
+# 构建产物
+out/
+dist/
+
+# 测试覆盖率
+coverage/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器 / IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# TypeScript 缓存
+*.tsbuildinfo
+
+# Vite / Vitest 缓存
+.vite/
+
+# Electron Builder 缓存
+.electron-builder-cache/
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 本地调试
+*.local
