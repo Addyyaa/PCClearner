@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createHashRouter, RouterProvider } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { AdsPage } from './routes/AdsPage'
 import { DashboardPage } from './routes/DashboardPage'
@@ -12,7 +12,7 @@ import { ResidualPage } from './routes/ResidualPage'
 import { SignaturePage } from './routes/SignaturePage'
 import { StartupPage } from './routes/StartupPage'
 
-const router = createBrowserRouter([
+const router = createHashRouter([
   {
     path: '/',
     element: <AppShell />,

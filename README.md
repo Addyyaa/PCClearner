@@ -1,6 +1,6 @@
 # PCCleaner
 
-PCCleaner 是一款基于 Electron + React + TypeScript 的跨平台系统清理与网络诊断工具。当前版本按计划完成工程骨架、服务类、IPC 接口、页面框架和关键方法名,复杂系统操作以中文注释标明实现细节与注意事项,方便后续 agent 逐项补充底层逻辑。
+PCCleaner 是一款基于 Electron + React + TypeScript 的跨平台系统清理与网络诊断工具。
 
 ## 功能范围
 

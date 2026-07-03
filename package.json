@@ -14,8 +14,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "@vscode/sudo-prompt": "^9.3.1",
@@ -59,7 +59,8 @@
       "resources/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": "dmg",
