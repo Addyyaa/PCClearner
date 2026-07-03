@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   Activity,
@@ -6,6 +7,7 @@ import {
   FolderInput,
   Gauge,
   HardDrive,
+  Info,
   Network,
   Power,
   Radar,
@@ -16,6 +18,7 @@ import { clsx } from 'clsx'
 import { LoadingOverlay } from './LoadingOverlay'
 import { Toast } from './Toast'
 import { zhCN } from '../i18n/zh-CN'
+import { useAppStore } from '../store/appStore'
 
 const navigation = [
   { to: '/', label: '总览', icon: Gauge },
@@ -28,10 +31,22 @@ const navigation = [
   { to: '/ads', label: '广告检测', icon: Bug },
   { to: '/signature', label: '文件检测', icon: FileCheck },
   { to: '/residual', label: '卸载残留', icon: Trash2 },
-  { to: '/migration', label: '软件迁移', icon: FolderInput }
+  { to: '/migration', label: '软件迁移', icon: FolderInput },
+  { to: '/about', label: '关于与更新', icon: Info }
 ]
 
 export function AppShell() {
+  const showToast = useAppStore((state) => state.showToast)
+
+  useEffect(() => {
+    const unsubscribe = window.api.update.onStatus((event) => {
+      if (event.type === 'update-available') {
+        showToast(`发现新版本 ${event.version}，请前往「关于与更新」安装`)
+      }
+    })
+    return unsubscribe
+  }, [showToast])
+
   return (
     <div className="min-h-screen bg-surface-light text-slate-900 dark:bg-surface-dark dark:text-white">
       <aside className="fixed inset-y-0 left-0 z-20 w-72 border-r border-slate-200 bg-white/90 p-5 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">

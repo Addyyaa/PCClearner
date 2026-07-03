@@ -1,5 +1,6 @@
 import { createHashRouter, RouterProvider } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { AboutPage } from './routes/AboutPage'
 import { AdsPage } from './routes/AdsPage'
 import { DashboardPage } from './routes/DashboardPage'
 import { DiskCleanerPage } from './routes/DiskCleanerPage'
@@ -27,7 +28,8 @@ const router = createHashRouter([
       { path: 'ads', element: <AdsPage /> },
       { path: 'signature', element: <SignaturePage /> },
       { path: 'residual', element: <ResidualPage /> },
-      { path: 'migration', element: <MigrationPage /> }
+      { path: 'migration', element: <MigrationPage /> },
+      { path: 'about', element: <AboutPage /> }
     ]
   }
 ])

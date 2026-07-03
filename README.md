@@ -2,6 +2,13 @@
 
 PCCleaner 是一款基于 Electron + React + TypeScript 的跨平台系统清理与网络诊断工具。
 
+## 许可协议
+
+本软件采用 **PCCleaner 自定义许可协议**（见 [LICENSE](LICENSE)）：
+
+- **个人开发者**：可免费用于个人学习、研究与非商业用途
+- **商业使用**：须事先获得书面商业授权，**不得免费商用**
+
 ## 功能范围
 
 - 磁盘清理:系统盘重点扫描、建议删除等级、默认勾选规则、回收站/备份安全策略。
@@ -12,7 +19,7 @@ PCCleaner 是一款基于 Electron + React + TypeScript 的跨平台系统清理
 - 磁盘占用:卷容量和目录树扫描接口,支持可释放空间估算。
 - 开机启动:Windows 与 macOS 启动来源抽象,支持一键关闭入口。
 - 桌面广告检测:启发式可疑来源扫描,提供结束进程、禁用启动项和隔离入口。
-- 用户提示:全局加载指示器、Toast、风险说明、二次确认和撤销接口。
+- **自动更新**:打包版启动后自动检查 GitHub Releases,支持手动检查、下载与安装。
 
 ## 开发命令
 
@@ -22,7 +29,17 @@ npm run dev
 npm run typecheck
 npm run test
 npm run build
+npm run dist
 ```
+
+## 发布与自动更新
+
+1. 更新 `package.json` 中的 `version`（如 `0.1.0` → `0.2.0`）
+2. 提交并打 tag：`git tag v0.2.0 && git push origin v0.2.0`
+3. GitHub Actions 会自动构建 Windows / macOS 安装包并发布到 Releases
+4. 用户端安装版会在启动约 5 秒后自动检查更新,也可在「关于与更新」页面手动操作
+
+> 开发模式 (`npm run dev`) 不启用自动更新,仅打包安装版可用。
 
 ## 目录结构
 

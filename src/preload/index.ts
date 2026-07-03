@@ -13,6 +13,7 @@ import type {
   SoftwareMigrationRequest,
   StartupChangeRequest
 } from '../../shared/types'
+import type { UpdateStatusEvent } from '../../shared/types/update'
 
 const api = {
   app: {
@@ -50,6 +51,7 @@ const api = {
   },
   network: {
     diagnose: () => ipcRenderer.invoke('network:diagnose'),
+    listFixes: () => ipcRenderer.invoke('network:list-fixes'),
     repair: (action: NetworkFixAction) => ipcRenderer.invoke('network:repair', action)
   },
   ads: {
@@ -67,6 +69,20 @@ const api = {
   migration: {
     list: () => ipcRenderer.invoke('migration:list'),
     migrate: (request: SoftwareMigrationRequest) => ipcRenderer.invoke('migration:migrate', request)
+  },
+  update: {
+    getVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,
+    isEnabled: () => ipcRenderer.invoke('update:is-enabled') as Promise<boolean>,
+    check: (showNoUpdateMessage = true) => ipcRenderer.invoke('update:check', showNoUpdateMessage),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStatus: (callback: (event: UpdateStatusEvent) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, event: UpdateStatusEvent) => callback(event)
+      ipcRenderer.on('update:status', handler)
+      return () => {
+        ipcRenderer.removeListener('update:status', handler)
+      }
+    }
   }
 }
 

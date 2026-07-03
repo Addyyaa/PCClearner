@@ -1,4 +1,5 @@
 import type { NetworkCheck, NetworkDiagnosis, NetworkFixAction } from '../../../../shared/types'
+import { NETWORK_FIX_DEFINITIONS, toFixAction } from './network-fix-catalog'
 
 export class NetworkRuleEngine {
   inferDiagnosis(checks: NetworkCheck[]): Pick<NetworkDiagnosis, 'rootCauses' | 'recommendedFixes'> {
@@ -11,42 +12,15 @@ export class NetworkRuleEngine {
     }
   }
 
-  private selectFixes(checks: NetworkCheck[]): NetworkFixAction[] {
-    const fixes: NetworkFixAction[] = []
+  /**
+   * 根据故障检查项所在的网络层,匹配修复动作目录中 targetLayers 命中的修复。
+   * 关键点: 同一修复可能对应多个层,这里用 Set 去重,保证按目录顺序稳定输出。
+   */
+  private selectFixes(failedChecks: NetworkCheck[]): NetworkFixAction[] {
+    const failedLayers = new Set(failedChecks.map((check) => check.layer))
 
-    if (checks.some((check) => check.layer === 'dns')) {
-      fixes.push({
-        id: 'flush-dns',
-        title: '刷新 DNS 缓存',
-        description: '清理本机 DNS 缓存,用于解决解析污染、陈旧记录或 DNS 缓存异常。',
-        requiresElevation: false,
-        reversible: false,
-        platform: 'all'
-      })
-    }
-
-    if (checks.some((check) => check.layer === 'network')) {
-      fixes.push({
-        id: 'renew-ip',
-        title: '释放并重新获取 IP',
-        description: '重新向 DHCP 服务器申请地址,用于解决 IP 配置异常或网关不可达问题。',
-        requiresElevation: true,
-        reversible: false,
-        platform: 'all'
-      })
-    }
-
-    if (checks.some((check) => check.layer === 'transport')) {
-      fixes.push({
-        id: 'reset-winsock',
-        title: '重置 Socket/Winsock',
-        description: '重置网络套接字目录,用于处理 socket 资源不足或 Winsock 损坏。',
-        requiresElevation: true,
-        reversible: false,
-        platform: 'windows'
-      })
-    }
-
-    return fixes
+    return NETWORK_FIX_DEFINITIONS.filter((definition) =>
+      definition.targetLayers.some((layer) => failedLayers.has(layer))
+    ).map(toFixAction)
   }
 }

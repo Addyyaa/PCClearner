@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
-import { registerIpcHandlers } from './ipc'
+import { registerIpcHandlers, initializeAutoUpdate } from './ipc'
 import { createServiceContainer } from './services/service-container'
 
 const services = createServiceContainer()
@@ -38,6 +38,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerIpcHandlers(services)
+  initializeAutoUpdate()
   createWindow()
 
   app.on('activate', () => {

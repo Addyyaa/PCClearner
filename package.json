@@ -1,9 +1,13 @@
 {
   "name": "pccleaner",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "跨平台系统清理与网络诊断工具",
   "author": "PCCleaner Team",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Addyyaa/PCClearner.git"
+  },
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -20,6 +24,7 @@
   "dependencies": {
     "@vscode/sudo-prompt": "^9.3.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.9",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -69,6 +74,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Addyyaa",
+      "repo": "PCClearner"
     }
   }
 }

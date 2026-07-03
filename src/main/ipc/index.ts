@@ -14,6 +14,9 @@ import type {
   StartupChangeRequest
 } from '../../../shared/types'
 import type { ServiceContainer } from '../services/service-container'
+import { AutoUpdateService } from '../services/update/auto-update-service'
+
+const autoUpdateService = new AutoUpdateService()
 
 export function registerIpcHandlers(services: ServiceContainer): void {
   ipcMain.handle('app:get-platform', () => services.platform.getPlatform())
@@ -47,6 +50,7 @@ export function registerIpcHandlers(services: ServiceContainer): void {
   ipcMain.handle('startup:set-enabled', (_, request: StartupChangeRequest) => services.startup.setEnabled(request))
 
   ipcMain.handle('network:diagnose', () => services.networkDiagnostics.diagnose())
+  ipcMain.handle('network:list-fixes', () => services.networkRepair.listAvailableFixes())
   ipcMain.handle('network:repair', (_, action: NetworkFixAction) => services.networkRepair.repair(action))
 
   ipcMain.handle('ads:scan', () => services.ads.scan())
@@ -60,4 +64,18 @@ export function registerIpcHandlers(services: ServiceContainer): void {
 
   ipcMain.handle('migration:list', () => services.migration.listPrograms())
   ipcMain.handle('migration:migrate', (_, request: SoftwareMigrationRequest) => services.migration.migrate(request))
+
+  ipcMain.handle('update:get-version', () => autoUpdateService.getCurrentVersion())
+  ipcMain.handle('update:is-enabled', () => autoUpdateService.isEnabled())
+  ipcMain.handle('update:check', (_, showNoUpdateMessage?: boolean) =>
+    autoUpdateService.checkForUpdates(showNoUpdateMessage ?? true)
+  )
+  ipcMain.handle('update:download', () => autoUpdateService.downloadUpdate())
+  ipcMain.handle('update:install', () => autoUpdateService.quitAndInstall())
+}
+
+export function initializeAutoUpdate(): AutoUpdateService {
+  autoUpdateService.initialize()
+  autoUpdateService.scheduleStartupCheck()
+  return autoUpdateService
 }
