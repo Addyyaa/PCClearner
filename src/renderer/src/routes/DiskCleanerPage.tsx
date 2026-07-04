@@ -27,8 +27,10 @@ export function DiskCleanerPage() {
   const [result, setResult] = useState<DiskScanResult>();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [platform, setPlatform] = useState("");
 
   useEffect(() => {
+    void api.app.getPlatform().then(setPlatform);
     void api.disk.listVolumes().then((nextVolumes: DiskVolumeUsage[]) => {
       setVolumes(nextVolumes);
       const systemVolume =
@@ -39,11 +41,21 @@ export function DiskCleanerPage() {
     });
   }, [api]);
 
+  const isMac = platform === "macos";
+
   const selectedBytes = useMemo(() => {
     if (!result) return 0;
     return result.items
       .filter((item) => selectedIds.includes(item.id))
       .reduce((sum, item) => sum + item.sizeBytes, 0);
+  }, [result, selectedIds]);
+
+  const hasElevatedSelection = useMemo(() => {
+    if (!result) return false;
+    return result.items.some(
+      (item) =>
+        selectedIds.includes(item.id) && item.sourceLocationId === "mac-var-folders",
+    );
   }, [result, selectedIds]);
 
   const sortedItems = useMemo(
@@ -101,12 +113,14 @@ export function DiskCleanerPage() {
 
   async function clean() {
     setConfirmOpen(false);
-    const operation = await withLoading("正在移动到回收站...", () =>
-      api.disk.clean({
-        itemIds: selectedIds,
-        moveToTrash: true,
-        createBackup: true,
-      }),
+    const operation = await withLoading(
+      isMac && hasElevatedSelection ? "正在清理需授权的项目..." : "正在移动到回收站...",
+      () =>
+        api.disk.clean({
+          itemIds: selectedIds,
+          moveToTrash: true,
+          createBackup: true,
+        }),
     );
 
     if (operation?.success) {
@@ -116,6 +130,11 @@ export function DiskCleanerPage() {
       showToast(operation.message);
     }
   }
+
+  const confirmDescription =
+    isMac && hasElevatedSelection
+      ? `将 ${selectedIds.length} 个项目清理到回收站或永久删除系统临时文件(需管理员密码),高风险项会先备份。释放约 ${formatBytes(selectedBytes)}。`
+      : `将 ${selectedIds.length} 个项目移动到系统回收站,高风险项会先备份。释放约 ${formatBytes(selectedBytes)}。`;
 
   return (
     <FeatureCard
@@ -168,9 +187,22 @@ export function DiskCleanerPage() {
       </div>
 
       {result?.summary.inaccessibleLocations?.length ? (
+        <div className="mt-4 space-y-2 text-sm text-amber-700 dark:text-amber-300">
+          <p>
+            以下位置需管理员权限才能完整扫描:{" "}
+            {result.summary.inaccessibleLocations.join("、")}
+          </p>
+          {isMac ? (
+            <p>
+              清理「系统临时缓存」时将请求管理员密码;系统目录下的文件会被永久删除,用户目录文件会移入废纸篓。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isMac && hasElevatedSelection ? (
         <p className="mt-4 text-sm text-amber-700 dark:text-amber-300">
-          以下位置需要提权扫描:{" "}
-          {result.summary.inaccessibleLocations.join("、")}
+          已选中需管理员授权的项目,清理时将弹出系统密码对话框。
         </p>
       ) : null}
 
@@ -245,7 +277,7 @@ export function DiskCleanerPage() {
       <ConfirmDialog
         open={confirmOpen}
         title="确认清理"
-        description={`将 ${selectedIds.length} 个项目移动到系统回收站,高风险项会先备份。释放约 ${formatBytes(selectedBytes)}。`}
+        description={confirmDescription}
         onConfirm={clean}
         onCancel={() => setConfirmOpen(false)}
       />

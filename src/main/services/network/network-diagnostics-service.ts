@@ -3,10 +3,13 @@ import { CommandRunner } from '../../platform/command-runner'
 import { PlatformService } from '../../platform/platform-service'
 import { withTimeout } from '../../utils/timeout'
 import { formatDnsEvidence, probeSystemDns } from './dns-checker'
+import { ConnectionStatsChecker } from './connection-stats-checker'
 import {
   type AdapterState,
+  findMacWifiDevice,
   inspectNetworkInterfaces,
   parseMacAdapterStates,
+  parseMacWifiAssociation,
   parseWindowsAdapterStates,
   parseWindowsNetAdapterJson
 } from './link-checker'
@@ -25,7 +28,8 @@ export class NetworkDiagnosticsService {
     private readonly platform: PlatformService,
     private readonly commandRunner: CommandRunner,
     private readonly ruleEngine: NetworkRuleEngine,
-    private readonly socketEventChecker: SocketEventChecker = new SocketEventChecker(commandRunner)
+    private readonly socketEventChecker: SocketEventChecker = new SocketEventChecker(commandRunner),
+    private readonly connectionStatsChecker: ConnectionStatsChecker = new ConnectionStatsChecker(platform, commandRunner)
   ) {}
 
   async diagnose(): Promise<NetworkDiagnosis> {
@@ -228,6 +232,11 @@ export class NetworkDiagnosticsService {
     }
 
     // 情况 5: 已连接的物理网卡持有有效 IP
+    if (this.platform.isMacOS()) {
+      const wifiFailure = await this.checkMacWifiAssociationFailure(physicalAdapters, evidence, virtualHint)
+      if (wifiFailure) return wifiFailure
+    }
+
     return {
       id: 'link-adapter',
       layer: 'link',
@@ -369,9 +378,11 @@ export class NetworkDiagnosticsService {
     }
 
     const socketLeakAnalysis = this.platform.isWindows() ? await this.socketEventChecker.analyze() : undefined
+    const macConnectionStats = this.platform.isMacOS() ? await this.connectionStatsChecker.analyze() : undefined
     const socketEvents = socketLeakAnalysis?.socketEvents ?? []
     const eventLogSuspects = [...new Set(socketEvents.map((event) => event.processName))]
-    const heavyConnector = socketLeakAnalysis?.heavyConnectors[0]
+    const heavyConnector = socketLeakAnalysis?.heavyConnectors[0] ?? macConnectionStats?.heavyConnectors[0]
+    const fixPlatform = this.platform.isMacOS() ? 'macos' : 'windows'
     const heavyConnectorRisk =
       heavyConnector != null &&
       establishedCount > 0 &&
@@ -406,7 +417,7 @@ export class NetworkDiagnosticsService {
         `${latestEvent.api ? `(API ${latestEvent.api})` : ''}:` +
         ' 系统缓冲区空间不足或队列已满,导致无法新建连接。' +
         ' 建议优先终止对应进程/服务,而非仅重置 Winsock。'
-      relatedFixes = eventLogSuspects.map((name) => buildStopSocketLeakFix(name, 'event-log'))
+      relatedFixes = eventLogSuspects.map((name) => buildStopSocketLeakFix(name, 'event-log', 'windows'))
     } else if (heavyConnectorRisk && heavyConnector) {
       status = 'fail'
       riskLevel = 'recommended'
@@ -414,7 +425,7 @@ export class NetworkDiagnosticsService {
         `${heavyConnector.processName} 当前持有 ${heavyConnector.connectionCount} 条网络连接` +
         `(约占 ESTABLISHED 的 ${Math.round((heavyConnector.connectionCount / Math.max(establishedCount, 1)) * 100)}%),` +
         ' 可能导致 Socket 资源耗尽。建议终止该进程/服务后重试联网。'
-      relatedFixes = [buildStopSocketLeakFix(heavyConnector.processName, 'connection-stats')]
+      relatedFixes = [buildStopSocketLeakFix(heavyConnector.processName, 'connection-stats', fixPlatform)]
     } else if (suspiciousTestPattern || portExhaustionRisk) {
       status = 'fail'
       riskLevel = 'recommended'
@@ -444,6 +455,37 @@ export class NetworkDiagnosticsService {
       evidence,
       riskLevel,
       relatedFixes
+    }
+  }
+
+  /** macOS: Wi-Fi 接口 active 但未关联 SSID 时不应判定链路正常。 */
+  private async checkMacWifiAssociationFailure(
+    physicalAdapters: AdapterState[],
+    evidence: string[],
+    virtualHint: string
+  ): Promise<NetworkCheck | undefined> {
+    const wifiDevice = findMacWifiDevice(physicalAdapters)
+    if (!wifiDevice) return undefined
+
+    const wifiAdapter = physicalAdapters.find((adapter) => adapter.name === wifiDevice)
+    if (!wifiAdapter?.enabled || !wifiAdapter.connected) return undefined
+
+    const result = await this.commandRunner
+      .run('networksetup', ['-getairportnetwork', wifiDevice], 8_000)
+      .catch(() => ({ stdout: '', stderr: '' }))
+
+    const association = parseMacWifiAssociation(wifiDevice, result.stdout)
+    if (association.associated) return undefined
+
+    return {
+      id: 'link-adapter',
+      layer: 'link',
+      name: '网卡与链路状态',
+      status: 'fail',
+      message:
+        `Wi-Fi 接口 ${wifiDevice} 已启用但未连接到热点,请连接可用 Wi-Fi 网络。${virtualHint}`,
+      evidence: [...evidence, `Wi-Fi 关联: 未连接${association.ssid ? ` (${association.ssid})` : ''}`],
+      riskLevel: 'recommended'
     }
   }
 

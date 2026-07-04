@@ -238,3 +238,41 @@ export function parseMacAdapterStates(stdout: string): AdapterState[] {
 
   return adapters
 }
+
+export interface MacWifiAssociation {
+  device: string
+  associated: boolean
+  ssid?: string
+}
+
+/**
+ * 解析 macOS `networksetup -getairportnetwork <device>` 输出。
+ * 未关联热点时通常返回 "You are not associated with an AirPort network"。
+ */
+export function parseMacWifiAssociation(device: string, stdout: string): MacWifiAssociation {
+  const text = stdout.trim()
+  const associatedMatch = text.match(/Current Wi-Fi Network:\s*(.+)/i)
+  if (associatedMatch) {
+    return { device, associated: true, ssid: associatedMatch[1].trim() }
+  }
+
+  const notAssociated =
+    /not associated|are not associated|未关联|没有关联/i.test(text) || (!text.includes('Network:') && text.length > 0 && !/error/i.test(text))
+
+  if (notAssociated || !text) {
+    return { device, associated: false }
+  }
+
+  return { device, associated: Boolean(text) && !/error/i.test(text), ssid: text }
+}
+
+/** 从适配器列表中找出 Wi-Fi 物理接口名(如 en0)。 */
+export function findMacWifiDevice(adapters: AdapterState[]): string | undefined {
+  const wifiAdapter = adapters.find(
+    (adapter) =>
+      !adapter.isVirtual && /^(en\d+|awdl0)$/i.test(adapter.name) && /wi-?fi|airport|无线/i.test(adapter.name)
+  )
+  if (wifiAdapter) return wifiAdapter.name
+
+  return adapters.find((adapter) => !adapter.isVirtual && /^en\d+$/i.test(adapter.name) && adapter.enabled)?.name
+}

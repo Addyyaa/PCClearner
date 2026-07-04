@@ -3,6 +3,7 @@ import {
   isPhysicalNetworkAdapter,
   isVirtualAdapter,
   parseMacAdapterStates,
+  parseMacWifiAssociation,
   parseWindowsAdapterStates,
   parseWindowsNetAdapterJson
 } from './link-checker'
@@ -166,5 +167,24 @@ describe('parseMacAdapterStates', () => {
     expect(en1?.connected).toBe(false)
     expect(en1?.enabled).toBe(false)
     expect(utun3?.isVirtual).toBe(true)
+  })
+})
+
+describe('parseMacWifiAssociation', () => {
+  it('识别已关联的 Wi-Fi 热点', () => {
+    const stdout = 'Current Wi-Fi Network: MyHomeWiFi'
+    expect(parseMacWifiAssociation('en0', stdout)).toEqual({
+      device: 'en0',
+      associated: true,
+      ssid: 'MyHomeWiFi'
+    })
+  })
+
+  it('识别未关联 Wi-Fi 的状态', () => {
+    const stdout = 'You are not associated with an AirPort network.'
+    expect(parseMacWifiAssociation('en0', stdout)).toEqual({
+      device: 'en0',
+      associated: false
+    })
   })
 })

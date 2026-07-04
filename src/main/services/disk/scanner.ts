@@ -40,9 +40,10 @@ export class DiskScanner {
     for (const location of locations) {
       const resolvedPath = resolveEnvironmentPath(location.path)
 
+      const heuristicDepth = location.heuristicMaxDepth ?? HEURISTIC_MAX_DEPTH
       const locationItems =
         location.scanMode === 'junkHeuristic'
-          ? await this.scanJunkHeuristic(location, resolvedPath, HEURISTIC_MAX_DEPTH)
+          ? await this.scanJunkHeuristic(location, resolvedPath, heuristicDepth)
           : await this.scanDirectory(location, resolvedPath, maxDepth)
 
       items.push(...locationItems)

@@ -13,6 +13,8 @@ export interface CleanableLocation {
    * junkHeuristic: 深度递归子目录，仅命中垃圾目录/垃圾文件模式，用于第三方应用垃圾。
    */
   scanMode?: 'direct' | 'junkHeuristic'
+  /** 启发式扫描的最大递归深度,未设置时使用 scanner 默认值。 */
+  heuristicMaxDepth?: number
 }
 
 export interface CleanableItem {

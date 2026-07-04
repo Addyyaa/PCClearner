@@ -83,11 +83,35 @@ export const NETWORK_FIX_DEFINITIONS: NetworkFixDefinition[] = [
     id: 'stop-socket-leak-process',
     title: '终止占用 Socket 的进程/服务',
     description:
-      '停止在事件日志中报告 Socket 错误 10055(缓冲区/队列已满)的进程或同名 Windows 服务。' +
+      '停止连接数异常偏高或报告 Socket 资源耗尽的进程。' +
       '请先运行诊断以定位具体进程;诊断结果会自动填入目标进程名。',
     requiresElevation: true,
     reversible: true,
-    platform: 'windows'
+    platform: 'all'
+  }),
+  withLayers({
+    id: 'reset-wifi',
+    title: '重置 Wi-Fi 接口',
+    description: '关闭并重新开启 Wi-Fi 接口电源,用于解决 Wi-Fi 假死或无法扫描热点的问题。执行后网络会短暂中断,请重新连接 Wi-Fi(仅 macOS)。',
+    requiresElevation: true,
+    reversible: true,
+    platform: 'macos'
+  }),
+  withLayers({
+    id: 'clear-proxy',
+    title: '清除网络代理',
+    description: '关闭当前网络服务的 Web/HTTPS/SOCKS 代理设置,用于解决代理残留导致的无法上网(仅 macOS)。',
+    requiresElevation: true,
+    reversible: true,
+    platform: 'macos'
+  }),
+  withLayers({
+    id: 'flush-route-cache',
+    title: '刷新路由缓存',
+    description: '刷新 macOS 路由表缓存,用于解决路由异常或切换网络后无法上网的问题。执行后网络可能短暂中断(仅 macOS)。',
+    requiresElevation: true,
+    reversible: false,
+    platform: 'macos'
   })
 ]
 

@@ -201,22 +201,29 @@ export type SocketLeakDetectionSource = 'event-log' | 'connection-stats'
 /** 为检测到的嫌疑进程生成参数化修复动作(进程名运行时填入,非写死)。 */
 export function buildStopSocketLeakFix(
   processName: string,
-  source: SocketLeakDetectionSource = 'event-log'
+  source: SocketLeakDetectionSource = 'event-log',
+  platform: NetworkFixAction['platform'] = 'windows'
 ): NetworkFixAction {
   const reason =
     source === 'event-log'
       ? '该进程在系统事件日志中报告了 Socket 错误 10055(缓冲区/队列已满)'
       : `该进程当前持有异常偏高的网络连接数`
 
+  const macDescription =
+    `终止 ${processName}。${reason},可能导致本机无法新建连接。` +
+    '将先发送 SIGTERM,必要时再强制结束进程。'
+
+  const windowsDescription =
+    `停止或终止 ${processName}。${reason},` +
+    '可能导致本机无法新建连接。将优先尝试停止同名 Windows 服务,再终止进程。'
+
   return {
     id: 'stop-socket-leak-process',
     title: `终止占用 Socket 的进程/服务 (${processName})`,
-    description:
-      `停止或终止 ${processName}。${reason},` +
-      '可能导致本机无法新建连接。将优先尝试停止同名 Windows 服务,再终止进程。',
+    description: platform === 'macos' ? macDescription : windowsDescription,
     requiresElevation: true,
     reversible: true,
-    platform: 'windows',
+    platform,
     target: processName
   }
 }

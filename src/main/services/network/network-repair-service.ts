@@ -3,6 +3,7 @@ import { CommandRunner } from '../../platform/command-runner'
 import { PlatformService } from '../../platform/platform-service'
 import { PrivilegeService } from '../../platform/privilege-service'
 import { parseWindowsAdapterStates, parseWindowsNetAdapterJson } from './link-checker'
+import { parseMacDefaultRouteInterface, resolveMacPrimaryService } from './mac-network-service'
 import { NETWORK_FIX_DEFINITIONS, toFixAction } from './network-fix-catalog'
 
 /** 默认公共 DNS,主备各一,兼顾国内外可达性。 */
@@ -37,6 +38,9 @@ export class NetworkRepairService {
       if (action.id === 'reset-dynamic-ports') return await this.resetDynamicPorts(action)
       if (action.id === 'reset-tcpip') return await this.resetTcpIp(action)
       if (action.id === 'stop-socket-leak-process') return await this.stopSocketLeakProcess(action)
+      if (action.id === 'reset-wifi') return await this.resetWifi(action)
+      if (action.id === 'clear-proxy') return await this.clearProxy(action)
+      if (action.id === 'flush-route-cache') return await this.flushRouteCache(action)
 
       return { actionId: action.id, success: false, message: '未知网络修复动作。' }
     } catch (error) {
@@ -198,17 +202,21 @@ export class NetworkRepairService {
    * 关键点: 先停服务再杀进程,与用户在事件查看器中手动定位后结束进程的操作一致。
    */
   private async stopSocketLeakProcess(action: NetworkFixAction): Promise<NetworkRepairResult> {
-    if (!this.platform.isWindows()) {
-      return { actionId: action.id, success: false, message: '终止 Socket 占用进程仅适用于 Windows。' }
-    }
-
     const target = action.target?.trim()
     if (!target) {
       return {
         actionId: action.id,
         success: false,
-        message: '未指定目标进程。请先运行网络诊断,系统会自动从事件日志中定位嫌疑进程。'
+        message: '未指定目标进程。请先运行网络诊断,系统会自动定位嫌疑进程。'
       }
+    }
+
+    if (this.platform.isMacOS()) {
+      return this.stopMacSocketLeakProcess(action, target)
+    }
+
+    if (!this.platform.isWindows()) {
+      return { actionId: action.id, success: false, message: '终止 Socket 占用进程在当前平台不可用。' }
     }
 
     const processName = target.toLowerCase().endsWith('.exe') ? target : `${target}.exe`
@@ -299,17 +307,86 @@ export class NetworkRepairService {
     return parseWindowsAdapterStates(result.stdout)
   }
 
-  /** 获取 macOS 当前启用的网络服务名称,失败时回退到「Wi-Fi」。 */
+  /** 获取 macOS 当前默认路由对应的网络服务名称。 */
   private async getMacPrimaryService(): Promise<string> {
-    const result = await this.commandRunner
-      .run('networksetup', ['-listallnetworkservices'])
-      .catch(() => ({ stdout: '', stderr: '' }))
+    const [routeResult, orderResult, listResult] = await Promise.all([
+      this.commandRunner.run('route', ['-n', 'get', 'default']).catch(() => ({ stdout: '', stderr: '' })),
+      this.commandRunner.run('networksetup', ['-listnetworkserviceorder']).catch(() => ({ stdout: '', stderr: '' })),
+      this.commandRunner.run('networksetup', ['-listallnetworkservices']).catch(() => ({ stdout: '', stderr: '' }))
+    ])
 
-    const serviceName = result.stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .find((line) => line && !line.startsWith('*') && !/An asterisk/i.test(line))
+    return resolveMacPrimaryService(routeResult.stdout, orderResult.stdout, listResult.stdout)
+  }
 
-    return serviceName ?? 'Wi-Fi'
+  /** macOS: 终止高连接数进程,先 SIGTERM 再 SIGKILL。 */
+  private async stopMacSocketLeakProcess(action: NetworkFixAction, target: string): Promise<NetworkRepairResult> {
+    const processName = target.replace(/\.exe$/i, '')
+    const escaped = processName.replace(/"/g, '\\"')
+
+    const command =
+      `pids=$(pgrep -if "${escaped}" 2>/dev/null); ` +
+      `if [ -z "$pids" ]; then echo "MISS"; exit 1; fi; ` +
+      `kill -TERM $pids 2>/dev/null; sleep 1; ` +
+      `remaining=$(pgrep -if "${escaped}" 2>/dev/null); ` +
+      `if [ -n "$remaining" ]; then kill -9 $remaining 2>/dev/null; fi; ` +
+      `if pgrep -if "${escaped}" >/dev/null 2>&1; then echo "MISS"; exit 1; else echo "OK"; fi`
+
+    try {
+      await this.privilegeService.runElevated({ name: 'PCCleaner', command })
+      return {
+        actionId: action.id,
+        success: true,
+        message: `已终止进程 ${processName}。请重新运行诊断确认 Socket 资源已恢复。`
+      }
+    } catch {
+      return {
+        actionId: action.id,
+        success: false,
+        message: `未能终止 ${processName}。该进程可能已退出,或需要更高权限/手动在活动监视器中结束。`
+      }
+    }
+  }
+
+  /** macOS: 重置 Wi-Fi 接口电源,解决 Wi-Fi 假死。 */
+  private async resetWifi(action: NetworkFixAction): Promise<NetworkRepairResult> {
+    const routeResult = await this.commandRunner.run('route', ['-n', 'get', 'default']).catch(() => ({ stdout: '', stderr: '' }))
+    const device = parseMacDefaultRouteInterface(routeResult.stdout) ?? 'en0'
+
+    await this.privilegeService.runElevated({
+      name: 'PCCleaner',
+      command: `networksetup -setairportpower ${device} off && sleep 2 && networksetup -setairportpower ${device} on`
+    })
+
+    return {
+      actionId: action.id,
+      success: true,
+      message: `已重置 Wi-Fi 接口 ${device},网络可能短暂中断,请重新连接 Wi-Fi。`
+    }
+  }
+
+  /** macOS: 关闭当前网络服务的 HTTP/HTTPS 代理。 */
+  private async clearProxy(action: NetworkFixAction): Promise<NetworkRepairResult> {
+    const serviceName = await this.getMacPrimaryService()
+    const escaped = serviceName.replace(/"/g, '\\"')
+
+    await this.privilegeService.runElevated({
+      name: 'PCCleaner',
+      command:
+        `networksetup -setwebproxystate "${escaped}" off && ` +
+        `networksetup -setsecurewebproxystate "${escaped}" off && ` +
+        `networksetup -setsocksfirewallproxystate "${escaped}" off`
+    })
+
+    return {
+      actionId: action.id,
+      success: true,
+      message: `已关闭「${serviceName}」的 Web/HTTPS/SOCKS 代理设置。`
+    }
+  }
+
+  /** macOS: 刷新路由缓存。 */
+  private async flushRouteCache(action: NetworkFixAction): Promise<NetworkRepairResult> {
+    await this.privilegeService.runElevated({ name: 'PCCleaner', command: 'route -n flush' })
+    return { actionId: action.id, success: true, message: '路由缓存已刷新,网络可能短暂中断。' }
   }
 }

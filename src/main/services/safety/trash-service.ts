@@ -1,6 +1,6 @@
 import { access, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { shell } from 'electron'
 import type { OperationResult } from '../../../../shared/types'
@@ -36,17 +36,22 @@ export class TrashService {
 
     let remaining = needsElevation
 
-    // 中文注释: 需要管理员权限的项目合并为一次 UAC 提权批量处理,避免每个文件弹一次授权框。
+    // 中文注释: 需要管理员权限的项目合并为一次提权批量处理,避免每个文件弹一次授权框。
     if (needsElevation.length > 0 && this.platform.isWindows()) {
-      remaining = await this.trashElevatedBatch(needsElevation)
+      remaining = await this.trashElevatedBatchWindows(needsElevation)
+    } else if (needsElevation.length > 0 && this.platform.isMacOS()) {
+      remaining = await this.trashElevatedBatchMac(needsElevation)
     }
 
     const movedCount = existingPaths.length - remaining.length
+    const isMacElevatedDelete = this.platform.isMacOS() && needsElevation.length > 0
 
     if (remaining.length === 0) {
       return {
         success: true,
-        message: `已移动 ${movedCount} 个项目到回收站`
+        message: isMacElevatedDelete
+          ? `已清理 ${movedCount} 个需管理员授权的项目(系统临时文件为永久删除)`
+          : `已移动 ${movedCount} 个项目到回收站`
       }
     }
 
@@ -55,7 +60,9 @@ export class TrashService {
     if (movedCount > 0) {
       return {
         success: true,
-        message: `已移动 ${movedCount} 个项目到回收站,${remaining.length} 个项目未能清理(${failedNames})。请关闭占用程序后重试。`
+        message: isMacElevatedDelete
+          ? `已清理 ${movedCount} 个项目,${remaining.length} 个未能删除(${failedNames})。请关闭占用程序后重试。`
+          : `已移动 ${movedCount} 个项目到回收站,${remaining.length} 个项目未能清理(${failedNames})。请关闭占用程序后重试。`
       }
     }
 
@@ -78,7 +85,7 @@ export class TrashService {
    * 单次 UAC 提权,批量将路径移入回收站(无逐文件弹窗)。
    * 使用临时 JSON 列表 + PowerShell 脚本,避免命令行转义问题。
    */
-  private async trashElevatedBatch(paths: string[]): Promise<string[]> {
+  private async trashElevatedBatchWindows(paths: string[]): Promise<string[]> {
     const stamp = Date.now()
     const listFile = join(tmpdir(), `pccleaner-trash-${stamp}.json`)
     const scriptFile = join(tmpdir(), `pccleaner-trash-${stamp}.ps1`)
@@ -115,6 +122,57 @@ export class TrashService {
       await unlink(scriptFile).catch(() => undefined)
     }
 
+    return this.collectRemaining(paths)
+  }
+
+  /**
+   * macOS 提权批量清理: 用户目录下尝试移入废纸篓,系统目录永久删除。
+   * 使用 JSON 列表 + shell 脚本,避免命令行转义问题。
+   */
+  private async trashElevatedBatchMac(paths: string[]): Promise<string[]> {
+    const stamp = Date.now()
+    const listFile = join(tmpdir(), `pccleaner-trash-mac-${stamp}.json`)
+    const scriptFile = join(tmpdir(), `pccleaner-trash-mac-${stamp}.sh`)
+    const home = homedir()
+    const trashDir = join(home, '.Trash')
+
+    const scriptContent = `#!/bin/bash
+LIST_FILE="${listFile.replace(/"/g, '\\"')}"
+TRASH_DIR="${trashDir.replace(/"/g, '\\"')}"
+HOME_DIR="${home.replace(/"/g, '\\"')}"
+
+while IFS= read -r p; do
+  [ -z "$p" ] && continue
+  [ ! -e "$p" ] && continue
+  if [[ "$p" == "$HOME_DIR"* ]]; then
+    base=$(basename "$p")
+    dest="$TRASH_DIR/\${base}_pccleaner_\$(date +%s)"
+    mv "$p" "$dest" 2>/dev/null || rm -rf "$p" 2>/dev/null
+  else
+    rm -rf "$p" 2>/dev/null
+  fi
+done < <(node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).forEach(p=>console.log(p))" "$LIST_FILE")
+`
+
+    await writeFile(listFile, JSON.stringify(paths), 'utf8')
+    await writeFile(scriptFile, scriptContent, 'utf8')
+
+    try {
+      await this.privilege.runElevated({
+        name: 'PCCleaner',
+        command: `chmod +x "${scriptFile}" && "${scriptFile}"`
+      })
+    } catch {
+      // 用户取消授权或脚本异常,下面仍根据磁盘实际状态统计结果
+    } finally {
+      await unlink(listFile).catch(() => undefined)
+      await unlink(scriptFile).catch(() => undefined)
+    }
+
+    return this.collectRemaining(paths)
+  }
+
+  private async collectRemaining(paths: string[]): Promise<string[]> {
     const remaining: string[] = []
     for (const target of paths) {
       if (await this.pathExists(target)) {
@@ -122,7 +180,6 @@ export class TrashService {
       }
       await delay(0)
     }
-
     return remaining
   }
 
