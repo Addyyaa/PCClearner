@@ -78,6 +78,16 @@ export const NETWORK_FIX_DEFINITIONS: NetworkFixDefinition[] = [
     requiresElevation: true,
     reversible: false,
     platform: 'windows'
+  }),
+  withLayers({
+    id: 'stop-socket-leak-process',
+    title: '终止占用 Socket 的进程/服务',
+    description:
+      '停止在事件日志中报告 Socket 错误 10055(缓冲区/队列已满)的进程或同名 Windows 服务。' +
+      '请先运行诊断以定位具体进程;诊断结果会自动填入目标进程名。',
+    requiresElevation: true,
+    reversible: true,
+    platform: 'windows'
   })
 ]
 

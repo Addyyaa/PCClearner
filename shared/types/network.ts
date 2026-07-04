@@ -10,6 +10,8 @@ export interface NetworkCheck {
   message: string
   evidence: string[]
   riskLevel: RiskLevel
+  /** 与本检查项直接关联的参数化修复动作(如终止特定进程)。 */
+  relatedFixes?: NetworkFixAction[]
 }
 
 export interface NetworkDiagnosis {
@@ -25,6 +27,8 @@ export interface NetworkFixAction {
   requiresElevation: boolean
   reversible: boolean
   platform: 'windows' | 'macos' | 'all'
+  /** 修复目标,如诊断动态识别出的嫌疑进程名 */
+  target?: string
 }
 
 export interface NetworkRepairResult extends OperationResult {

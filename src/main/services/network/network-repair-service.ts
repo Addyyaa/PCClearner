@@ -36,6 +36,7 @@ export class NetworkRepairService {
       if (action.id === 'reset-winsock') return await this.resetWinsock(action)
       if (action.id === 'reset-dynamic-ports') return await this.resetDynamicPorts(action)
       if (action.id === 'reset-tcpip') return await this.resetTcpIp(action)
+      if (action.id === 'stop-socket-leak-process') return await this.stopSocketLeakProcess(action)
 
       return { actionId: action.id, success: false, message: '未知网络修复动作。' }
     } catch (error) {
@@ -190,6 +191,66 @@ export class NetworkRepairService {
     // 中文注释: netsh int ip reset 会重写 TCP/IP 注册表项,属于高风险操作,必须提权且提示重启。
     await this.privilegeService.runElevated({ name: 'PCCleaner', command: 'netsh int ip reset' })
     return { actionId: action.id, success: true, message: 'TCP/IP 协议栈已重置,请重启计算机使其完全生效。' }
+  }
+
+  /**
+   * 终止在事件日志中报告 Socket 10055 的进程或同名 Windows 服务。
+   * 关键点: 先停服务再杀进程,与用户在事件查看器中手动定位后结束进程的操作一致。
+   */
+  private async stopSocketLeakProcess(action: NetworkFixAction): Promise<NetworkRepairResult> {
+    if (!this.platform.isWindows()) {
+      return { actionId: action.id, success: false, message: '终止 Socket 占用进程仅适用于 Windows。' }
+    }
+
+    const target = action.target?.trim()
+    if (!target) {
+      return {
+        actionId: action.id,
+        success: false,
+        message: '未指定目标进程。请先运行网络诊断,系统会自动从事件日志中定位嫌疑进程。'
+      }
+    }
+
+    const processName = target.toLowerCase().endsWith('.exe') ? target : `${target}.exe`
+    const serviceKeyword = processName.replace(/\.exe$/i, '')
+    const escapedProcess = processName.replace(/"/g, '\\"')
+    const escapedKeyword = serviceKeyword.replace(/"/g, '\\"')
+
+    const command =
+      `$name = '${escapedKeyword}'; ` +
+      `$exe = '${escapedProcess}'; ` +
+      `$stopped = @(); ` +
+      `Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$name*" -or $_.DisplayName -like "*$name*" } | ForEach-Object { ` +
+      `  try { Stop-Service -Name $_.Name -Force -ErrorAction Stop; $stopped += $_.Name } catch {} ` +
+      `}; ` +
+      `$killed = $false; ` +
+      `try { taskkill /F /IM $exe 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { $killed = $true } } catch {}; ` +
+      `if ($stopped.Count -gt 0 -or $killed) { ` +
+      `  Write-Output ("OK:" + ($stopped -join ",") + ":" + ($killed ? "1" : "0")) ` +
+      `} else { Write-Output "MISS"; exit 1 }`
+
+    try {
+      const output = await this.privilegeService.runElevated({ name: 'PCCleaner', command })
+      const match = output.match(/OK:([^:]*):([01])/)
+      const stoppedServices = match?.[1] ? match[1].split(',').filter(Boolean) : []
+      const killed = match?.[2] === '1'
+
+      const parts: string[] = []
+      if (stoppedServices.length) parts.push(`已停止服务: ${stoppedServices.join('、')}`)
+      if (killed) parts.push(`已终止进程: ${processName}`)
+
+      return {
+        actionId: action.id,
+        success: true,
+        message: parts.length ? `${parts.join('；')}。请重新运行诊断确认 Socket 资源已恢复。` : `${processName} 已处理完成。`
+      }
+    } catch {
+      return {
+        actionId: action.id,
+        success: false,
+        message: `未能停止 ${processName}。该进程可能已退出,或需要更高权限/手动在任务管理器中结束。`
+      }
+    }
   }
 
   /**

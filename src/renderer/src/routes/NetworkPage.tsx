@@ -61,18 +61,32 @@ export function NetworkPage() {
   }
 
   const recommendedIds = useMemo(
-    () => new Set(diagnosis?.recommendedFixes.map((fix) => fix.id)),
+    () =>
+      new Set(
+        (diagnosis?.recommendedFixes ?? []).flatMap((fix) =>
+          fix.target ? [`${fix.id}:${fix.target}`, fix.id] : [fix.id]
+        )
+      ),
     [diagnosis?.recommendedFixes]
   )
 
+  const displayFixes = useMemo(() => {
+    const parameterized = (diagnosis?.recommendedFixes ?? []).filter((fix) => fix.target)
+    const hideGenericStop = parameterized.some((fix) => fix.id === 'stop-socket-leak-process')
+    const staticFixes = fixes.filter((fix) => !(hideGenericStop && fix.id === 'stop-socket-leak-process'))
+    return [...parameterized, ...staticFixes]
+  }, [diagnosis?.recommendedFixes, fixes])
+
   const sortedFixes = useMemo(
     () =>
-      [...fixes].sort((a, b) => {
-        const aRank = recommendedIds.has(a.id) ? 0 : 1
-        const bRank = recommendedIds.has(b.id) ? 0 : 1
+      [...displayFixes].sort((a, b) => {
+        const aKey = a.target ? `${a.id}:${a.target}` : a.id
+        const bKey = b.target ? `${b.id}:${b.target}` : b.id
+        const aRank = recommendedIds.has(aKey) ? 0 : 1
+        const bRank = recommendedIds.has(bKey) ? 0 : 1
         return aRank - bRank
       }),
-    [fixes, recommendedIds]
+    [displayFixes, recommendedIds]
   )
 
   const hasRecommended = (diagnosis?.recommendedFixes.length ?? 0) > 0
@@ -144,10 +158,11 @@ export function NetworkPage() {
 
         <div className="grid gap-3 md:grid-cols-2">
           {sortedFixes.map((fix) => {
-            const recommended = recommendedIds.has(fix.id)
+            const fixKey = fix.target ? `${fix.id}:${fix.target}` : fix.id
+            const recommended = recommendedIds.has(fixKey)
             return (
               <div
-                key={fix.id}
+                key={fixKey}
                 className={clsx(
                   'flex flex-col gap-3 rounded-2xl border p-4 transition',
                   recommended

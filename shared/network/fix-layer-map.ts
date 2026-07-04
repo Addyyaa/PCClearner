@@ -11,7 +11,8 @@ export const FIX_TARGET_LAYERS: Record<string, NetworkLayer[]> = {
   'renew-ip': ['network', 'link'],
   'reset-winsock': ['transport'],
   'reset-dynamic-ports': ['transport'],
-  'reset-tcpip': ['network', 'transport', 'application']
+  'reset-tcpip': ['network', 'transport', 'application'],
+  'stop-socket-leak-process': ['transport']
 }
 
 /** 获取某一网络层可用的修复动作 id 列表。 */

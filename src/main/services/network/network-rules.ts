@@ -6,10 +6,28 @@ export class NetworkRuleEngine {
     const failedChecks = checks.filter((check) => check.status === 'fail' || check.status === 'warning')
     const rootCauses = failedChecks.map((check) => `${check.name}: ${check.message}`)
 
+    const catalogFixes = this.selectFixes(failedChecks)
+    const relatedFixes = failedChecks.flatMap((check) => check.relatedFixes ?? [])
+
     return {
       rootCauses,
-      recommendedFixes: this.selectFixes(failedChecks)
+      recommendedFixes: this.mergeFixes(catalogFixes, relatedFixes)
     }
+  }
+
+  /** 合并目录修复与参数化修复,参数化修复(带 target)优先且去重。 */
+  private mergeFixes(catalogFixes: NetworkFixAction[], relatedFixes: NetworkFixAction[]): NetworkFixAction[] {
+    const merged: NetworkFixAction[] = []
+    const seen = new Set<string>()
+
+    for (const fix of [...relatedFixes, ...catalogFixes]) {
+      const key = fix.target ? `${fix.id}:${fix.target.toLowerCase()}` : fix.id
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(fix)
+    }
+
+    return merged
   }
 
   /**

@@ -11,6 +11,11 @@ import {
   parseWindowsNetAdapterJson
 } from './link-checker'
 import { NetworkRuleEngine } from './network-rules'
+import {
+  buildStopSocketLeakFix,
+  SocketEventChecker,
+  type SocketErrorEvent
+} from './socket-event-checker'
 
 export class NetworkDiagnosticsService {
   /** 整次诊断的最大耗时,防止个别系统命令在断网时长时间无响应。 */
@@ -19,7 +24,8 @@ export class NetworkDiagnosticsService {
   constructor(
     private readonly platform: PlatformService,
     private readonly commandRunner: CommandRunner,
-    private readonly ruleEngine: NetworkRuleEngine
+    private readonly ruleEngine: NetworkRuleEngine,
+    private readonly socketEventChecker: SocketEventChecker = new SocketEventChecker(commandRunner)
   ) {}
 
   async diagnose(): Promise<NetworkDiagnosis> {
@@ -362,15 +368,54 @@ export class NetworkDiagnosticsService {
       }
     }
 
+    const socketLeakAnalysis = this.platform.isWindows() ? await this.socketEventChecker.analyze() : undefined
+    const socketEvents = socketLeakAnalysis?.socketEvents ?? []
+    const eventLogSuspects = [...new Set(socketEvents.map((event) => event.processName))]
+    const heavyConnector = socketLeakAnalysis?.heavyConnectors[0]
+    const heavyConnectorRisk =
+      heavyConnector != null &&
+      establishedCount > 0 &&
+      heavyConnector.connectionCount >= Math.max(200, Math.floor(establishedCount * 0.3))
+
     const portExhaustionRisk = portCount > 0 && establishedCount >= Math.max(200, Math.floor(portCount * 0.7))
     const smallPortRange = portCount > 0 && portCount < 5000
     const suspiciousTestPattern = localhost9999Listening && localhost9999Established > 50
+    const eventLogSocketLeak = socketEvents.length > 0 && eventLogSuspects.length > 0
 
     let status: NetworkCheck['status'] = 'pass'
     let message = `TIME_WAIT ${timeWaitCount} 个, ESTABLISHED ${establishedCount} 个, Socket 资源正常。`
     let riskLevel: NetworkCheck['riskLevel'] = 'safe'
+    let relatedFixes: NetworkCheck['relatedFixes']
 
-    if (suspiciousTestPattern || portExhaustionRisk) {
+    const evidence = [
+      `TIME_WAIT=${timeWaitCount}`,
+      `ESTABLISHED=${establishedCount}`,
+      localhost9999Established > 0 ? `127.0.0.1:9999 ESTABLISHED=${localhost9999Established}` : '',
+      portMessage,
+      ...this.formatSocketEventEvidence(socketEvents),
+      heavyConnector ? `高连接进程: ${heavyConnector.processName}(${heavyConnector.connectionCount} 条)` : ''
+    ].filter(Boolean)
+
+    if (eventLogSocketLeak) {
+      status = 'fail'
+      riskLevel = 'recommended'
+      const latestEvent = socketEvents[0]
+      const suspectList = eventLogSuspects.join('、')
+      message =
+        `检测到 ${suspectList} 在系统事件日志中报告 Socket 错误 ${latestEvent.errorCode}` +
+        `${latestEvent.api ? `(API ${latestEvent.api})` : ''}:` +
+        ' 系统缓冲区空间不足或队列已满,导致无法新建连接。' +
+        ' 建议优先终止对应进程/服务,而非仅重置 Winsock。'
+      relatedFixes = eventLogSuspects.map((name) => buildStopSocketLeakFix(name, 'event-log'))
+    } else if (heavyConnectorRisk && heavyConnector) {
+      status = 'fail'
+      riskLevel = 'recommended'
+      message =
+        `${heavyConnector.processName} 当前持有 ${heavyConnector.connectionCount} 条网络连接` +
+        `(约占 ESTABLISHED 的 ${Math.round((heavyConnector.connectionCount / Math.max(establishedCount, 1)) * 100)}%),` +
+        ' 可能导致 Socket 资源耗尽。建议终止该进程/服务后重试联网。'
+      relatedFixes = [buildStopSocketLeakFix(heavyConnector.processName, 'connection-stats')]
+    } else if (suspiciousTestPattern || portExhaustionRisk) {
       status = 'fail'
       riskLevel = 'recommended'
       message = `临时端口资源紧张或已耗尽(ESTABLISHED=${establishedCount}`
@@ -396,14 +441,18 @@ export class NetworkDiagnosticsService {
       name: 'Socket 与 TCP 资源',
       status,
       message,
-      evidence: [
-        `TIME_WAIT=${timeWaitCount}`,
-        `ESTABLISHED=${establishedCount}`,
-        localhost9999Established > 0 ? `127.0.0.1:9999 ESTABLISHED=${localhost9999Established}` : '',
-        portMessage
-      ].filter(Boolean),
-      riskLevel
+      evidence,
+      riskLevel,
+      relatedFixes
     }
+  }
+
+  /** 格式化事件日志中的 Socket 错误证据,供 UI 展示。 */
+  private formatSocketEventEvidence(events: SocketErrorEvent[]): string[] {
+    return events.slice(0, 5).map((event) => {
+      const time = event.timeCreated ? event.timeCreated.replace('T', ' ').slice(0, 19) : '未知时间'
+      return `事件日志: ${time} ${event.processName} 报告 Socket ${event.errorCode}${event.api ? ` @ ${event.api}` : ''}`
+    })
   }
 
   private async checkApplicationLayer(): Promise<NetworkCheck> {
